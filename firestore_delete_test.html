@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Firebase Self-Delete Test</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f7f7f7; }
+        .container { max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; background-color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #3498db; margin-bottom: 20px; }
+        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.3s; font-weight: bold; margin-top: 10px; }
+        #loginBtn { background-color: #3498db; color: white; }
+        #loginBtn:hover { background-color: #2980b9; }
+        #testBtn { background-color: #e67e22; color: white; }
+        #testBtn:hover:not(:disabled) { background-color: #d35400; }
+        #testBtn:disabled { background-color: #ccc; cursor: not-allowed; }
+        #results { max-width: 600px; margin: 20px auto; padding: 15px; background-color: #f4f4f4; border: 1px dashed #999; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; }
+        p strong { font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Firebase Self-Delete Test Result</h1>
+        
+        <button id="loginBtn">1. Sign In with Your University Account</button>
+        
+        <p style="margin-top: 15px;">Authenticated Student UID (Attacker): <strong id="myUid" style="color: green;">...</strong></p>
+        
+        <button id="testBtn" style="display:none;" disabled>2. Start Self-Delete Data Test</button>
+    </div>
+    
+    <pre id="results">Test log will appear here...</pre>
+
+    <script>
+        // --- (1) Firebase Configuration Keys ---
+        const FIREBASE_API_KEY = "AIzaSyAsiQ3Us7rPpC0PauqkoK7vK5XduB8FAz0";
+        const FIREBASE_PROJECT_ID = "ucas-student-issues";
+        const FIREBASE_AUTH_DOMAIN = "ucas-student-issues.firebaseapp.com"; 
+
+        const firebaseConfig = {
+            apiKey: FIREBASE_API_KEY,
+            authDomain: FIREBASE_AUTH_DOMAIN,
+            projectId: FIREBASE_PROJECT_ID
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        
+        const loginBtn = document.getElementById('loginBtn');
+        const testBtn = document.getElementById('testBtn');
+        const myUidEl = document.getElementById('myUid');
+        const resultsEl = document.getElementById('results');
+
+        let currentUserId = null; // Stores the logged-in UID
+
+        // --- (2) Authentication State Handler ---
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                currentUserId = user.uid; // Store the session UID
+                myUidEl.textContent = currentUserId;
+                loginBtn.style.display = 'none';
+                testBtn.style.display = 'block';
+                testBtn.disabled = false;
+                resultsEl.textContent += `Welcome ${user.displayName}, login successful.\n`;
+                resultsEl.textContent += `Current UID (The one attempting deletion): ${currentUserId}\n\n`;
+            } else {
+                myUidEl.textContent = 'Not Logged In';
+                loginBtn.style.display = 'block';
+                testBtn.style.display = 'none';
+                resultsEl.textContent = "Test log will appear here...";
+            }
+        });
+
+        // --- (3) Self-Delete Attack Simulation Function ---
+        async function testSelfDelete() {
+            if (!currentUserId) {
+                resultsEl.textContent += "Error: User is not logged in.\n";
+                return;
+            }
+
+            testBtn.disabled = true;
+            resultsEl.textContent += `--- Attempting to DELETE personal document for UID: ${currentUserId} ---\n`;
+            
+            try {
+                // Attempt to delete the document with the same UID as the logged-in user
+                const docRef = db.collection('students_profiles').doc(currentUserId);
+                await docRef.delete();
+
+                // Deletion Success
+                resultsEl.textContent += ">> SUCCESS (Functional): Document for the UID was successfully deleted!\n";
+                resultsEl.textContent += "IMPLICATION: Security rules allow the student to delete their profile. (If this is not the desired behavior, this is a SECURITY FLAW).\n";
+                
+                // Prompt to restore the deleted document
+                if (confirm("Do you want to restore the document that was just deleted to continue testing?")) {
+                    await docRef.set({
+                        studentName: "Teststd User",
+                        deletionTest: true,
+                        // Add any other required fields here if necessary
+                    }, { merge: true });
+                    resultsEl.textContent += "Document successfully restored.\n";
+                }
+
+            } catch (error) {
+                // Deletion Failure
+                if (error.code === 'permission-denied') {
+                    // Functional Failure (Security is strict)
+                    resultsEl.textContent += ">> FAILURE (Functional): Deletion was denied based on security rules (Permission Denied).\n";
+                    resultsEl.textContent += "IMPLICATION: The student cannot delete their profile. (This is generally the desired secure behavior).\n";
+                } else {
+                    resultsEl.textContent += ">> Unexpected Error: " + error.message + "\n";
+                }
+            } finally {
+                testBtn.disabled = false;
+            }
+        }
+
+        loginBtn.addEventListener('click', () => {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            auth.signInWithPopup(provider).catch(err => {
+                resultsEl.textContent += "Login Error: " + err.message + "\n";
+            });
+        });
+
+        testBtn.addEventListener('click', testSelfDelete);
+    </script>
+</body>
+</html>
